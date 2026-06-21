@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB GAPS 시나리오 모니터</title>
+<style>
+:root{
+  --bg:#0f1419; --panel:#161c24; --panel2:#1c242e; --line:#2a3441;
+  --ink:#e6edf3; --ink-dim:#8b98a8; --ink-faint:#5a6776;
+  --normal:#3d4f63; --watch:#c9922e; --imminent:#e0653c; --active:#e8483f;
+  --met:#e8483f; --near:#e0922e; --far:#3d5066;
+  --accent:#4a9eea;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font-family:'Segoe UI',-apple-system,'Malgun Gothic',sans-serif;
+  line-height:1.5;padding:24px 18px 48px;max-width:1080px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:baseline;
+  border-bottom:2px solid var(--line);padding-bottom:14px;margin-bottom:8px;flex-wrap:wrap;gap:8px}
+h1{font-size:1.35rem;font-weight:700;letter-spacing:-.01em}
+.subtitle{color:var(--ink-faint);font-size:.8rem}
+.timestamp{color:var(--ink-dim);font-size:.8rem;font-variant-numeric:tabular-nums}
+.banner{margin:14px 0 22px;padding:11px 16px;border-radius:7px;font-size:.92rem;font-weight:600}
+.banner.quiet{background:var(--panel);color:var(--ink-dim);border:1px solid var(--line)}
+.banner.alert{background:rgba(232,72,63,.12);color:#ff8a7d;border:1px solid rgba(232,72,63,.4)}
+.block{margin-bottom:30px}
+.block>h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--ink-dim);margin-bottom:13px;font-weight:600}
+/* 시나리오 현황 */
+.scn-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.scn-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--normal);
+  border-radius:8px;padding:14px 15px}
+.scn-card.watch{border-left-color:var(--watch)}
+.scn-card.imminent{border-left-color:var(--imminent)}
+.scn-card.active{border-left-color:var(--active);box-shadow:0 0 0 1px rgba(232,72,63,.3)}
+.scn-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.scn-id{font-size:.72rem;color:var(--ink-faint);letter-spacing:.05em;font-weight:600}
+.scn-status{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:11px}
+.scn-status.normal{background:rgba(61,79,99,.3);color:var(--ink-dim)}
+.scn-status.watch{background:rgba(201,146,46,.2);color:var(--watch)}
+.scn-status.imminent{background:rgba(224,101,60,.2);color:var(--imminent)}
+.scn-status.active{background:rgba(232,72,63,.25);color:#ff8a7d}
+.scn-name{font-size:.95rem;font-weight:600;margin-bottom:11px;min-height:2.4em}
+.scn-count{font-size:.74rem;color:var(--ink-dim);margin-bottom:4px;font-variant-numeric:tabular-nums}
+.scn-bar{height:5px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.scn-fill{height:100%;background:var(--normal);transition:width .3s}
+.scn-fill.watch{background:var(--watch)}.scn-fill.imminent{background:var(--imminent)}
+.scn-fill.active{background:var(--active)}
+.scn-trans{font-size:.76rem;color:var(--ink-faint);margin-top:9px}
+.branch{font-size:.74rem;color:var(--watch);margin-top:5px}
+/* 지표 테이블 */
+.ind-table{width:100%;border-collapse:collapse;font-size:.86rem}
+.ind-table th{text-align:left;color:var(--ink-faint);font-size:.7rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.05em;padding:7px 10px;border-bottom:1px solid var(--line)}
+.ind-table td{padding:10px;border-bottom:1px solid rgba(42,52,65,.5);vertical-align:middle}
+.ind-name{font-weight:600}
+.ind-val,.ind-thr,.ind-res{font-variant-numeric:tabular-nums;color:var(--ink-dim)}
+.row-met .ind-val{color:#ff8a7d;font-weight:700}
+.row-met .ind-res{color:#ff8a7d;font-weight:600}
+.ind-prox{width:160px}
+.ind-bar{height:7px;background:var(--panel2);border-radius:4px;overflow:hidden}
+.ind-fill{height:100%}
+.ind-fill.met{background:var(--met)}.ind-fill.near{background:var(--near)}
+.ind-fill.far{background:var(--far)}.ind-fill.na{background:transparent}
+/* 타임라인 */
+.timeline{list-style:none;border-left:2px solid var(--line);margin-left:6px}
+.tl-item{position:relative;padding:9px 0 9px 20px}
+.tl-item::before{content:'';position:absolute;left:-7px;top:14px;width:10px;height:10px;
+  border-radius:50%;background:var(--ink-faint);border:2px solid var(--bg)}
+.tl-execute::before{background:var(--active)}.tl-resolve::before{background:var(--accent)}
+.tl-prepare::before{background:var(--imminent)}
+.tl-date{font-variant-numeric:tabular-nums;font-weight:600;font-size:.84rem;margin-right:10px}
+.tl-scn{color:var(--ink-dim);font-size:.84rem;margin-right:10px}
+.tl-trans{font-weight:600;font-size:.84rem;margin-right:10px}
+.tl-grade{color:var(--ink-faint);font-size:.8rem}
+.tl-ev{color:var(--ink-faint);font-size:.78rem;margin-top:3px}
+/* 정성 */
+.qual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.qual-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:13px 15px}
+.qual-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
+.qual-name{font-weight:600;font-size:.92rem}
+.qual-state{font-size:.74rem;font-weight:700;padding:2px 9px;border-radius:11px;
+  background:var(--panel2);color:var(--ink-dim)}
+.qual-state.s-confirmed{background:rgba(232,72,63,.2);color:#ff8a7d}
+.qual-state.s-hawkish{background:rgba(224,101,60,.2);color:var(--imminent)}
+.qual-state.s-dovish{background:rgba(74,158,234,.2);color:var(--accent)}
+.qual-meta{font-size:.76rem;color:var(--ink-faint)}
+.qual-meta a{color:var(--accent);text-decoration:none}
+.qual-meta a:hover{text-decoration:underline}
+.no-ref{color:var(--ink-faint)}
+.comp{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:.7rem;padding:2px 8px;border-radius:10px}
+.chip.on{background:rgba(232,72,63,.2);color:#ff8a7d}
+.chip.off{background:var(--panel2);color:var(--ink-faint)}
+.qual-note{font-size:.78rem;color:var(--ink-dim);margin-top:7px}
+.note{font-size:.74rem;color:var(--ink-faint);margin-top:9px}
+.empty{color:var(--ink-faint);font-size:.86rem;padding:14px 0}
+footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);
+  color:var(--ink-faint);font-size:.72rem;text-align:center}
+@media(max-width:600px){.ind-prox{width:90px}.ind-table{font-size:.78rem}
+  .ind-table td,.ind-table th{padding:7px 5px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header><div><h1>DB GAPS 시나리오 모니터</h1><div class="subtitle">FIS런던지부 · 제12회 DB GAPS</div></div><div class="timestamp">갱신 2026-06-22 00:33<br>거래일 —</div></header><div class="banner quiet">전이 없음 — 정상 운용 상태</div><section class="block"><h2>시나리오 현황</h2><div class="scn-grid">
+        <div class="scn-card normal">
+          <div class="scn-head">
+            <span class="scn-id">시나리오 I</span>
+            <span class="scn-status normal">정상</span>
+          </div>
+          <div class="scn-name">스태그플레이션형 전면 압박</div>
+          <div class="scn-meter">
+            <div class="scn-count">0/3 조건 충족</div>
+            <div class="scn-bar"><div class="scn-fill normal"
+                 style="width:0%"></div></div>
+          </div>
+          <div class="scn-trans">변화 없음</div>
+          
+        </div>
+        <div class="scn-card normal">
+          <div class="scn-head">
+            <span class="scn-id">시나리오 II</span>
+            <span class="scn-status normal">정상</span>
+          </div>
+          <div class="scn-name">지정학 충격형 Risk-off</div>
+          <div class="scn-meter">
+            <div class="scn-count">0/1 조건 충족</div>
+            <div class="scn-bar"><div class="scn-fill normal"
+                 style="width:0%"></div></div>
+          </div>
+          <div class="scn-trans">변화 없음</div>
+          
+        </div>
+        <div class="scn-card normal">
+          <div class="scn-head">
+            <span class="scn-id">시나리오 III</span>
+            <span class="scn-status normal">정상</span>
+          </div>
+          <div class="scn-name">미국 나홀로 강세형 Risk-on</div>
+          <div class="scn-meter">
+            <div class="scn-count">0/4 조건 충족</div>
+            <div class="scn-bar"><div class="scn-fill normal"
+                 style="width:0%"></div></div>
+          </div>
+          <div class="scn-trans">변화 없음</div>
+          
+        </div>
+        <div class="scn-card normal">
+          <div class="scn-head">
+            <span class="scn-id">시나리오 IV</span>
+            <span class="scn-status normal">정상</span>
+          </div>
+          <div class="scn-name">경기 침체형 Risk-off</div>
+          <div class="scn-meter">
+            <div class="scn-count">0/3 조건 충족</div>
+            <div class="scn-bar"><div class="scn-fill normal"
+                 style="width:0%"></div></div>
+          </div>
+          <div class="scn-trans">변화 없음</div>
+          
+        </div></div></section><section class="block"><h2>지표 모니터</h2>
+    <table class="ind-table">
+      <thead><tr><th>지표</th><th>현재값</th><th>임계값</th>
+      <th>임계 근접도</th><th>잔여</th></tr></thead>
+      <tbody>
+        <tr class="">
+          <td class="ind-name">미 CPI 전월비</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">0.4%</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">미 10년물 금리</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">4.8%</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">미 비농업고용</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">250천명</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">삼의 법칙</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">0.5%p</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">달러인덱스</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">107</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">ISM 제조업 PMI</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">52↑ / 48↓</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">WTI 급등(T0대비)</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">0.2%</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr>
+        <tr class="">
+          <td class="ind-name">기술주 동반강세</td>
+          <td class="ind-val">데이터 없음</td>
+          <td class="ind-thr">4/4</td>
+          <td class="ind-prox"><div class="ind-bar"><div class="ind-fill na"></div></div></td>
+          <td class="ind-res">—</td>
+        </tr></tbody>
+    </table>
+    <p class="note">임계 근접도 막대: 길수록 임계값에 근접. 빨강=충족, 주황=임박(80%↑), 회색=여유.</p>
+    </section><section class="block"><h2>전이 로그 타임라인</h2><p class="empty">아직 기록된 전이가 없습니다. 전이가 발생하면 날짜·시나리오·근거가 여기에 쌓입니다.</p></section><section class="block"><h2>확인 요망 (정성 조건)</h2>
+    <p class="note">정성 조건은 시스템이 자동 발현하지 않습니다. 출처 확인 후 사용자가 직접 확정합니다.</p>
+    <div class="qual-grid">
+        <div class="qual-card">
+          <div class="qual-head"><span class="qual-name">연준 스탠스</span>
+            <span class="qual-state s-neutral">neutral</span></div>
+          <div class="qual-meta">확정주체: init · <span class="no-ref">출처 미등록</span></div>
+          
+          
+        </div>
+        <div class="qual-card">
+          <div class="qual-head"><span class="qual-name">지정학 이벤트</span>
+            <span class="qual-state s-none">none</span></div>
+          <div class="qual-meta">확정주체: init · <span class="no-ref">출처 미등록</span></div>
+          
+          
+        </div>
+        <div class="qual-card">
+          <div class="qual-head"><span class="qual-name">국내 반도체 공급망</span>
+            <span class="qual-state s-none">none</span></div>
+          <div class="qual-meta">확정주체: init · <span class="no-ref">출처 미등록</span></div>
+          <div class="comp"><span class="chip off">출하감소</span> <span class="chip off">수주취소</span> <span class="chip off">가격하락</span></div>
+          
+        </div></div></section><footer>이 페이지는 매 거래일 자동 생성됩니다. 정성 조건 발현은 사용자 확정이 필요합니다.</footer>
+</body>
+</html>
